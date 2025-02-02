@@ -1,0 +1,477 @@
+' Stores in three files the addresses and the names of the senders,
+' then scan selected messages and move to SPAM or NOTIFICATIONS folders all
+' spam/notifications according to blackilist/notificatioLnist
+' It is recommended to add three buttons to the Developer toolbar:
+' Clean: launch  cleanupFolder()
+' Spam: launch manuallyUpdateBlacklist(), all selected messages will be added to SPAM list
+' Notification: launch manuallyUpdateNotificationsList(), all selected messages will be added to NOTIFICATIONS list
+
+
+Const TYP = "selection"
+Dim blacklist As Variant
+Dim blacklistNames As Variant
+Dim notificList As Variant
+
+Const cartellaDocumenti = "G:\documenti" ' CUSTOMIZE THIS FOLDER FOR YOUR SYSTEM
+
+
+Sub cleanupFolder() ' *************** MAIN - remove spam from inbox *****************
+    Dim olApp As Outlook.Application
+    Dim olNs As Outlook.NameSpace
+    Dim olFldr As Outlook.MAPIFolder
+    Dim olJunk As Outlook.folder
+    Dim olItms As Variant 'Outlook.Items
+    Dim olmail As MailItem ' Variant
+    Dim i As Long
+    
+    Dim file_system_object As Object, my_file As Object
+    Dim name_of_file As String, Arr As Variant
+
+    Dim tempval As Integer
+    Dim allAddressesArr() As Variant
+    Dim deletedCount As Integer
+    Dim alladdrCount As Integer
+    Dim addressesCountArr() As Integer
+    Dim f As folder
+
+    Set olApp = New Outlook.Application
+    Set olNs = olApp.GetNamespace("MAPI")
+    Set objItems = olApp.ActiveExplorer.Selection
+
+    'Set objShell = CreateObject("WScript.Shell")
+    'regKey = objShell.RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders\Personal")
+ 
+    
+    Set file_system_object = CreateObject("Scripting.FileSystemObject")
+    
+    ' Percorso del file blacklist.txt
+    name_of_file = cartellaDocumenti & "\blacklist.txt"
+    If Not file_system_object.FileExists(name_of_file) Then
+        risposta = MsgBox("Il file '" & name_of_file & "' non esiste nella cartella '" & cartellaDocumenti & "'." & vbCrLf & _
+                          "Vuoi crearne uno vuoto?", vbYesNo + vbQuestion, "File mancante")
+        If risposta = vbYes Then
+            Set my_file = file_system_object.CreateTextFile(name_of_file, True)
+            my_file.Close
+        Else
+            MsgBox "Esecuzione interrotta dall'utente.", vbCritical, "Interruzione"
+            Exit Sub
+        End If
+    End If
+    Set my_file = file_system_object.OpenTextFile(name_of_file, 1)
+    blacklist2 = Split(my_file.ReadAll, vbNewLine)
+    my_file.Close
+    
+    ' Percorso del file blacklistNames.txt
+    name_of_fileNames = cartellaDocumenti & "\blacklistNames.txt"
+    If Not file_system_object.FileExists(name_of_fileNames) Then
+        risposta = MsgBox("Il file '" & name_of_fileNames & "' non esiste nella cartella '" & cartellaDocumenti & "'." & vbCrLf & _
+                          "Vuoi crearne uno vuoto?", vbYesNo + vbQuestion, "File mancante")
+        If risposta = vbYes Then
+            Set my_fileNames = file_system_object.CreateTextFile(name_of_fileNames, True)
+            my_fileNames.Close
+        Else
+            MsgBox "Esecuzione interrotta dall'utente.", vbCritical, "Interruzione"
+            Exit Sub
+        End If
+    End If
+    Set my_fileNames = file_system_object.OpenTextFile(name_of_fileNames, 1)
+    blacklistNames = Split(my_fileNames.ReadAll, vbNewLine)
+    my_fileNames.Close
+    
+    ' Percorso del file notifications.txt
+    notifications_file = cartellaDocumenti & "\notifications.txt"
+    If Not file_system_object.FileExists(notifications_file) Then
+        risposta = MsgBox("Il file '" & notifications_file & "' non esiste nella cartella '" & cartellaDocumenti & "'." & vbCrLf & _
+                          "Vuoi crearne uno vuoto?", vbYesNo + vbQuestion, "File mancante")
+        If risposta = vbYes Then
+            Set my_fileNotifications = file_system_object.CreateTextFile(notifications_file, True)
+            my_fileNotifications.Close
+        Else
+            MsgBox "Esecuzione interrotta dall'utente.", vbCritical, "Interruzione"
+            Exit Sub
+        End If
+    End If
+    Set my_fileNotifications = file_system_object.OpenTextFile(notifications_file, 1)
+    notificList2 = Split(my_fileNotifications.ReadAll, vbNewLine)
+    my_fileNotifications.Close
+   
+    deletedCount = 0
+    movedCount = 0
+    mexcount = 0
+    
+    Set objItems = olApp.ActiveExplorer.Selection
+Debug.Print objItems(1).Parent.FolderPath & ": " & Str(objItems.Count) & " messages to check..."
+    
+    Set fs = objItems(1).Parent.Parent
+    junkFolder = ""
+    notifFolder = ""
+Debug.Print ("Available folders: ")
+    For Each fold In fs.Folders
+ Debug.Print (fold.Name)
+        If (UCase(fold.Name) = "SPAM") Then
+            Set junkFolder = fold
+        Else
+          '
+        End If
+        If (UCase(fold.Name) = "NOTIFICHE") Then
+            Set notifFolder = fold
+        Else
+          '
+        End If
+    Next
+
+    If junkFolder = "" Then
+        MsgBox ("Fatal error, can't find JUNK folder (" + junkFolder + ")")
+        Exit Sub
+    End If
+    
+    If notifFolder = "" Then
+        MsgBox ("Fatal rror, can't find NOTIFICATIONS folder (" + notifFolder + ")")
+        Exit Sub
+    End If
+    
+    itemcount = 0
+    mexcount = 0
+    spamCount = 0
+    spamCountNames = 0
+    notifCount = 0
+    For Each olmail In objItems
+            mexcount = mexcount + 1
+Debug.Print ("Searching " + olmail.SenderEmailAddress + " in lists...")
+            For Each mailaddr In blacklist2
+                If mailaddr <> "" Then
+                    If InStr(UCase(olmail.SenderEmailAddress), UCase(mailaddr)) > 0 Then
+                        Debug.Print ">>>>>>>>>>>>> REMOVING " & olmail.SenderEmailAddress & " - " & olmail.Subject & " - " & olmail.SentOn
+                        On Error Resume Next
+                        olmail.Move junkFolder
+                        olmail.UnRead = False
+                        spamCount = spamCount + 1
+                    Else
+                        'Debug.Print ">>>>   OK  >>>" & ": " & olmail.SenderEmailAddress & " - " & olmail.Subject & " - " & olmail.SentOn
+                    End If
+            
+                    DoEvents
+                End If
+            Next mailaddr
+        
+            For Each recipientName In blacklistNames
+                If recipientName <> "" Then
+                    If InStr(UCase(olmail.SenderName), UCase(recipientName)) > 0 Then
+                        Debug.Print ">>>>>>>>>>>>> REMOVING " & olmail.SenderName & " - " & olmail.Subject & " - " & olmail.SentOn
+                        On Error Resume Next
+                        olmail.Move junkFolder
+                        olmail.UnRead = False
+                        spamCountNames = spamCountNames + 1
+                    Else
+                        'Debug.Print ">>>>   OK  >>>" & ": " & olmail.SenderEmailAddress & " - " & olmail.Subject & " - " & olmail.SentOn
+                    End If
+            
+                    DoEvents
+                End If
+            Next recipientName
+        
+            For Each mailaddr In notificList2
+                If mailaddr <> "" Then
+                    If InStr(UCase(olmail.SenderEmailAddress), UCase(mailaddr)) > 0 Then
+                        Debug.Print ">>>>>>>>>>>>> MOVING " & olmail.SenderEmailAddress & " - " & olmail.Subject & " - " & olmail.SentOn
+                        On Error Resume Next
+                        olmail.Move notifFolder
+                        olmail.UnRead = False
+                        notifCount = notifCount + 1
+                    Else
+                        ' Debug.Print ">>>>   OK  >>>" & ": " & notifCountDebug & "," & olmail.SenderEmailAddress & " - " & olmail.Subject & " - " & olmail.SentOn
+                    End If
+                    DoEvents
+                End If
+            Next mailaddr
+        Next olmail
+        MsgBox ("Done!" & vbCrLf & mexcount & " scanned; " & vbCrLf & spamCount & "+" & spamCountNames & "  moved to spam folder; " & vbrlf & notifCount & " moved to notifications folder.")
+End Sub
+
+Function GetDocumentFolderPath()
+    Dim shell As Object
+    Dim docPath
+    Set shell = CreateObject("WScript.Shell")
+    docPath = shell.SpecialFolders("MyDocuments")
+    GetDocumentFolderPath = docPath
+End Function
+
+
+
+
+
+
+Sub GetFromInbox()
+' Extract from selected messages all email addresses and count their occurrences
+
+    Dim olApp As Outlook.Application
+    Dim olNs As Outlook.NameSpace
+    Dim olFldr As Outlook.MAPIFolder
+    Dim olJunk As Outlook.folder
+    Dim olItms As Variant 'Outlook.Items
+    Dim olmail As MailItem ' Variant
+    Dim i As Long
+    
+    Dim file_system_object As Object, my_file As Object
+    Dim name_of_file As String, Arr As Variant
+
+    Dim tempval As Integer
+    Dim allAddressesArr() As Variant
+    Dim deletedCount As Integer
+    Dim alladdrCount As Integer
+    Dim addressesCountArr() As Integer
+    Dim f As folder
+
+    Set olApp = New Outlook.Application
+    Set olNs = olApp.GetNamespace("MAPI")
+    Set objItems = olApp.ActiveExplorer.Selection '.Item(1)
+
+'    Open "c:\temp\alladdresses.txt" For Output As #2
+    Set objShell = CreateObject("WScript.Shell")
+    'regKey = objShell.RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders\Personal")
+    'cartellaDocumenti = regKey
+
+        name_of_file = cartellaDocumenti & "\blacklist.txt"
+        Set file_system_object = CreateObject("Scripting.FileSystemObject")
+        Set my_file = file_system_object.OpenTextFile(name_of_file, 1)
+            Arr = Split(my_file.ReadAll, vbNewLine)
+        my_file.Close
+        
+        deletedCount = 0
+        alladdrCount = 0
+        mexcount = 0
+        ReDim allAddressesArr(alladdrCount)
+        allAddressesArr(alladdrCount) = "dummy"
+        
+        Set objItems = olApp.ActiveExplorer.Selection
+'Debug.Print objItems(1).Parent.FolderPath & ": " & Str(objItems.Count) & " to check..."
+        
+        itemcount = 0
+        For Each olmail In objItems
+            itemcount = itemcount + 1
+            tempval = UBound(allAddressesArr)
+            index = 0
+            trovato = False
+            While index <= tempval And trovato = False
+                If UCase(olmail.SenderEmailAddress) = UCase(allAddressesArr(index)) Then
+                    trovato = True
+'Debug.Print ("            " & olmail.SenderEmailAddress & " trovato")
+                Else
+' Debug.Print olmail.SenderEmailAddress & " vs " & Arr(index) & ": no"
+                    index = index + 1
+                End If
+            Wend
+            
+            If trovato = False Then
+Debug.Print "Aggiungo " & olmail.SenderEmailAddress
+                alladdrCount = alladdrCount + 1
+                ReDim Preserve allAddressesArr(alladdrCount)
+                allAddressesArr(alladdrCount) = olmail.SenderEmailAddress
+                ReDim Preserve addressesCountArr(alladdrCount)
+                addressesCountArr(alladdrCount) = 1
+                'Print #2, olmail.SenderEmailAddress
+            Else
+                addressesCountArr(index) = addressesCountArr(index) + 1
+            End If
+            DoEvents
+            statusbar = Str(itemcount)
+        Next olmail
+ 
+        Set olFldr = Nothing
+        Set olNs = Nothing
+        Set olApp = Nothing
+    
+    'Close #2
+    
+    Open cartellaDocumenti & "\alladdresses.txt" For Append As #2
+    For i = 1 To alladdrCount
+        'If addressesCountArr(i) > 2 Then
+            Debug.Print zero$(addressesCountArr(i), 4) & vbTab & allAddressesArr(i)
+            Print #2, zero$(addressesCountArr(i), 4) & vbTab & allAddressesArr(i)
+        'End If
+    Next
+    Close #2
+    
+    MsgBox ("Data saved")
+
+End Sub
+
+Function zero$(i, L)
+    s = LTrim(Str(i))
+    For x = 1 To L
+        If Len(s) < L Then s = "0" & s
+    Next
+    zero$ = s
+End Function
+
+
+
+Sub manuallyUpdateBlacklist() ' ************** Click button to add selected messages to spam list ******************
+    ' ---------- Add to blacklist file all new senders found in selected messages
+    Dim olApp As Outlook.Application
+    Dim olNs As Outlook.NameSpace
+    Dim olmail As MailItem
+    Dim i As Long
+    
+    Dim file_system_object As Object, my_file As Object
+    Dim name_of_file As String
+    
+    'Dim cartellaDocumenti As String
+    Dim regKey As String
+    Dim objShell As Object
+    
+    Set objShell = CreateObject("WScript.Shell")
+    'regKey = objShell.RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders\Personal")
+    'cartellaDocumenti = regKey
+
+    Set olApp = New Outlook.Application
+    Set olNs = olApp.GetNamespace("MAPI")
+    Set objItems = olApp.ActiveExplorer.Selection '.Item(1)
+
+    ' ---------  Read and store blacklist in array:
+    Set objShell = CreateObject("WScript.Shell")
+    'regKey = objShell.RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders\Personal")
+    'cartellaDocumenti = regKey
+
+
+    name_of_file = cartellaDocumenti & "\blacklist.txt"
+    Set file_system_object = CreateObject("Scripting.FileSystemObject")
+    Set my_file = file_system_object.OpenTextFile(name_of_file, 1)
+        blacklist = Split(my_file.ReadAll, vbNewLine)
+    my_file.Close
+    
+    ' ---------  Read and store blacklistNames in array:
+    name_of_file2 = cartellaDocumenti & "\blacklistNames.txt"
+    Set file_system_object2 = CreateObject("Scripting.FileSystemObject")
+    Set my_file2 = file_system_object2.OpenTextFile(name_of_file2, 1)
+        blacklistNames = Split(my_file2.ReadAll, vbNewLine)
+    my_file2.Close
+    
+    
+    newcount = 0
+    Open name_of_file For Append As #2
+        For Each olmail In objItems
+            If isKnown(olmail.SenderEmailAddress) Then
+                'addressesCountArr(index) = addressesCountArr(index) + 1
+            Else
+Debug.Print "Adding ADDRESS " + olmail.SenderEmailAddress + " to blacklist."
+                ReDim Preserve blacklist(UBound(blacklist) + 1)
+                blacklist(UBound(blacklist)) = olmail.SenderEmailAddress
+                Print #2, olmail.SenderEmailAddress
+                newcount = newcount + 1
+            End If
+        Next
+    Close #2
+
+    
+    newcount2 = 0
+    Open name_of_file2 For Append As #2
+        For Each olmail In objItems
+            If isKnownName(olmail.SenderName) Then
+                'addressesCountArr(index) = addressesCountArr(index) + 1
+            Else
+Debug.Print "Adding NAME " + olmail.SenderName + " to blacklist."
+                ReDim Preserve blacklistNames(UBound(blacklistNames) + 1)
+                blacklistNames(UBound(blacklistNames)) = olmail.SenderName
+                Print #2, olmail.SenderName
+                newcount2 = newcount2 + 1
+            End If
+        Next
+    Close #2
+
+    
+    MsgBox (newcount & "+" & newcount2 & " addresses added to blacklist")
+End Sub
+
+Sub manuallyUpdateNotificationsList()
+    ' ---------- Add to notification list file all new senders found in selected messages
+    Dim olApp As Outlook.Application
+    Dim olNs As Outlook.NameSpace
+    Dim olmail As MailItem
+    Dim i As Long
+    
+    Dim file_system_object As Object, my_file As Object
+    Dim notifications_file As String
+
+    Set olApp = New Outlook.Application
+    Set olNs = olApp.GetNamespace("MAPI")
+    Set objItems = olApp.ActiveExplorer.Selection
+    Set objShell = CreateObject("WScript.Shell")
+    'regKey = objShell.RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders\Personal")
+    'cartellaDocumenti = regKey
+
+
+
+    notifications_file = cartellaDocumenti & "\notifications.txt"
+    Set file_system_object = CreateObject("Scripting.FileSystemObject")
+    Set my_file = file_system_object.OpenTextFile(notifications_file, 1)
+        notificList = Split(my_file.ReadAll, vbNewLine)
+    my_file.Close
+    
+    newcount = 0
+    Open notifications_file For Append As #2
+        For Each olmail In objItems
+            If isKnownNotif(olmail.SenderEmailAddress) Then
+                'addressesCountArr(index) = addressesCountArr(index) + 1
+            Else
+Debug.Print "Adding " + olmail.SenderEmailAddress + " to notifications list."
+                ReDim Preserve notificList(UBound(notificList) + 1)
+                notificList(UBound(notificList)) = olmail.SenderEmailAddress
+                Print #2, olmail.SenderEmailAddress
+                newcount = newcount + 1
+            End If
+        Next
+    Close #2
+
+    MsgBox (newcount & " addresses added to notifications list")
+End Sub
+
+Function isKnown(s As String) As Boolean
+Debug.Print ("Checking B " & s)
+    arrLen = UBound(blacklist)
+    index = 0
+    trovato = False
+    While index <= arrLen And trovato = False
+        If UCase(s) = UCase(blacklist(index)) Then
+            trovato = True
+        Else
+            index = index + 1
+        End If
+    Wend
+    If trovato = False Then Debug.Print "      New: ";
+    isKnown = trovato
+End Function
+
+Function isKnownName(s As String) As Boolean
+Debug.Print ("Checking name " & s)
+    arrLen = UBound(blacklistNames)
+    index = 0
+    trovato = False
+    While index <= arrLen And trovato = False
+        If UCase(s) = UCase(blacklistNames(index)) Then
+            trovato = True
+        Else
+            index = index + 1
+        End If
+    Wend
+    If trovato = False Then Debug.Print "      New: ";
+    isKnownNames = trovato
+End Function
+
+
+
+Function isKnownNotif(s As String) As Boolean
+Debug.Print ("Checking N " & s)
+    arrLen = UBound(notificList)
+    index = 0
+    trovato = False
+    While index <= arrLen And trovato = False
+        If UCase(s) = UCase(notificList(index)) Then
+            trovato = True
+        Else
+            index = index + 1
+        End If
+    Wend
+If trovato = False Then Debug.Print "      New: ";
+    isKnownNotif = trovato
+End Function
